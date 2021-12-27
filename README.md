@@ -1,2 +1,2 @@
 # Netty-Study
- Netty框架学习
+该笔记是根据尚硅谷Netty的视频，自己边听边记得。
