@@ -2052,61 +2052,117 @@ ChannelFuture sync(),等待异步操作执行完毕
    
    ![](image\ChannelHandler接口和类一览图.png)
 
-4. 我们经常需要自定义一个 Handler 类去继承 ChannelInboundHandlerAdapter
+4. 我们经常需要自定义一个 Handler 类去继承 ChannelInboundHandlerAdapter，然后通过重写相应方法实现业务逻辑，我们接下来看看一般都需要重写哪些方法
    
-   然后通过重写相应方法实现业务逻辑，我们接下来看看一般都需要重写哪些方法
+   ```java
+   public class ChannelInboundHandlerAdapter extends ChannelHandlerAdapter implements ChannelInboundHandler {
+   
+       @Override
+       public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelRegistered();
+       }
+   
+       @Override
+       public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelUnregistered();
+       }
+   
+       @Override
+       public void channelActive(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelActive();
+       }
+   
+       @Override
+       public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelInactive();
+       }
+   
+       @Override
+       public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+           ctx.fireChannelRead(msg);
+       }
+   
+       @Override
+       public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelReadComplete();
+       }
+       @Override
+       public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+           ctx.fireUserEventTriggered(evt);
+       }
+       @Override
+       public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+           ctx.fireChannelWritabilityChanged();
+       }
+   
+       @Override
+       public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+               throws Exception {
+           ctx.fireExceptionCaught(cause);
+       }
+   }
+   ```
+   
+   
 
 ## 6.6、Pipeline 和 ChannelPipeline
 
-ChannelPipeline 是一个重点：
+- ChannelPipeline 是一个重点：
 
-ChannelPipeline 是一个 Handler 的集合
+  - ChannelPipeline 是一个 Handler 的集合
 
-它负责处理和拦截 inbound 或者 outbound 的事件和操作，相当于一个贯穿 Netty 的链。(也可以这样理解：
+  - 它负责处理和拦截 inbound 或者 outbound 的事件和操作，相当于一个贯穿 Netty 的链。(也可以这样理解：ChannelPipeline 是 保存 ChannelHandler 的 List，用于处理或拦截Channel 的入站事件和出站操作)
 
-ChannelPipeline 是 保存 ChannelHandler 的 List，用于处理或拦截Channel 的入站事件和出站操作)
+  - ChannelPipeline 实现了一种高级形式的拦截过滤器模式，使用户可以完全控制事件的处理方式，以及 Channel中各个的 ChannelHandler 如何相互交互
 
-ChannelPipeline 实现了一种高级形式的拦截过滤器模式，使用户可以完全控制事件的处理方式，以及 Channel中各个的 ChannelHandler 如何相互交互
+  - 在 Netty 中每个 Channel 都有且仅有一个 ChannelPipeline 与之对应，它们的组成关系如下
 
-在 Netty 中每个 Channel 都有且仅有一个 ChannelPipeline 与之对应，它们的组成关系如下
+    ​	![](image/channel结构图.png)
 
-channel能拿到他对应的channelPipeline
-channelPipeline也可以获取到对应的channel
-channelPipeline中包含一个个的ChannelHandlerContext的双向链表
-每个ChannelHandlerContext（保存 Channel 相关的所有上下文信息）里面包含对应具体的channelHandler
-常用方法
+    - channel能拿到他对应的channelPipeline
+    - channelPipeline也可以获取到对应的channel
+    - channelPipeline中包含一个个的ChannelHandlerContext的双向链表
+    - 每个ChannelHandlerContext（保存 Channel 相关的所有上下文信息）里面包含对应具体的channelHandler
 
-ChannelPipeline addFirst(ChannelHandler… handlers)
+  
 
-把一个业务处理类（handler）添加到链中的第一个位置
+- 常用方法
 
-ChannelPipeline addLast(ChannelHandler… handlers)
+​	ChannelPipeline addFirst(ChannelHandler… handlers)   把一个业务处理类（handler）添加到链中的第一个位置
 
-把一个业务处理类（handler）添加到链中的最后一个位置
+   ChannelPipeline addLast(ChannelHandler… handlers)  把一个业务处理类（handler）添加到链中的最后一个位置
 
-## 6.6、ChannelHandlerContext 保存 Channel 相关的所有上下文信息，同时关联一个 ChannelHandler 对象
+## 6.7、ChannelHandlerContext 
 
-即 ChannelHandlerContext 中 包 含 一 个 具 体 的 事 件 处 理 器 ChannelHandler ， 同 时ChannelHandlerContext 中也绑定了对应的 pipeline 和 Channel 的信息，方便对 ChannelHandler 进行调用.
+1. 保存 Channel 相关的所有上下文信息，同时关联一个 ChannelHandler 对象
 
-常用方法
+2. 即 ChannelHandlerContext 中 包 含 一 个 具 体 的 事 件 处 理 器 ChannelHandler ， 同 时ChannelHandlerContext 中也绑定了对应的 pipeline 和 Channel 的信息，方便对 ChannelHandler 进行调用.
 
-## 6.7、ChannelOption Netty 在创建 Channel 实例后,一般都需要设置 ChannelOption 参数。
+3. 常用方法
 
-ChannelOption 参数如下:
+   ![](image/ChannelHandlerContext常用方法.png)
 
-九、EventLoopGroup 和其实现类 NioEventLoopGroup
-EventLoopGroup 是一组 EventLoop（就是对应线程） 的抽象，Netty 为了更好的利用多核 CPU 资源，一般会有多个 EventLoop同时工作，每个 EventLoop 维护着一个 Selector 实例。
+## 6.8、ChannelOption 
 
-EventLoopGroup 提供 next 接口，可以从组里面按照一定规则获取其中一个 EventLoop 来处理任务。
+1. Netty 在创建 Channel 实例后,一般都需要设置 ChannelOption 参数。
 
-在 Netty服务器端编程中 ，我们一般 都 需 要 提 供 两 个 EventLoopGroup ， 例 如 ：
+2. ChannelOption 参数如下:
 
-BossEventLoopGroup
-WorkerEventLoopGroup
+   ![](image\channelOption.png)
 
-通常一个服务端口即一个 ServerSocketChannel 对应一个 Selector 和一个 EventLoop 线程。
+## 6.9、EventLoopGroup 和其实现类 NioEventLoopGroup
 
-服务端中，BossEventLoop 负责接收客户端的连接并将 SocketChannel 交给 WorkerEventLoopGroup 来进行 IO 处理，如下图所示：↓
+1. EventLoopGroup 是一组 EventLoop（就是对应线程） 的抽象，Netty 为了更好的利用多核 CPU 资源，一般会有多个 EventLoop同时工作，每个 EventLoop 维护着一个 Selector 实例。
+
+2. EventLoopGroup 提供 next 接口，可以从组里面按照一定规则获取其中一个 EventLoop 来处理任务。
+
+3. 在 Netty服务器端编程中 ，我们一般 都 需 要 提 供 两 个 EventLoopGroup ， 例 如 ：BossEventLoopGroup WorkerEventLoopGroup
+
+4. 通常一个服务端口即一个 ServerSocketChannel 对应一个 Selector 和一个 EventLoop 线程。
+
+5. 服务端中，BossEventLoop 负责接收客户端的连接并将 SocketChannel 交给 WorkerEventLoopGroup 来进行 IO 处理，如下图所示：↓
+
+   ![](image/BossGroup到WorkGroup.png)
 
 常用方法：
 
@@ -2114,17 +2170,22 @@ public NioEventLoopGroup()，构造方法
 
 public Future<?> shutdownGracefully()，断开连接，关闭线程
 
-## 6.8、Unpooled 类
+## 6.10、Unpooled 类
 
-Netty 提供一个专门用来操作缓冲区(即 Netty 的数据容器)的工具类
+1. Netty 提供一个专门用来操作缓冲区(即 Netty 的数据容器)的工具类
 
-他内部维护了对应的readerIndex和writerIndex
+2. 他内部维护了对应的readerIndex和writerIndex
 
-相比NIO的ByteBuffer，Netty 提供的ByteBuf不用考虑flip反转去操作读写
+3. 相比NIO的ByteBuffer，Netty 提供的ByteBuf不用考虑flip反转去操作读写
 
-常用方法如下所示
+4. 常用方法
 
-举例说明 Unpooled 获取 Netty 的数据容器 ByteBuf 的基本使用
+   ```java
+   //通过给定的数据和字符编码返回一个ByteBuf对象（类似于NIO中的ByteBuffer但有区别）
+   public static ByteBuf copiedBuffer(CharSequence String,Charset charset)
+   ```
+
+   举例说明 Unpooled 获取 Netty 的数据容器 ByteBuf 的基本使用
 
 案例
 
@@ -2157,13 +2218,7 @@ public class NettyByteBuf01 {
 }
 ```
 
-
-
-
-
 案例 2
-
-
 
 ```java
 public class NettyByteBuf02 { 
@@ -2198,3 +2253,6 @@ public class NettyByteBuf02 {
 
 
 
+## 6.11、Netty应用实例-群聊系统
+
+- 要求
