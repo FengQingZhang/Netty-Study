@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="io.netty.all" type="repository">
+    <properties maven-id="io.netty:netty-all:4.0.0.Beta1" />
+    <CLASSES>
+      <root url="jar://D:/.m2/netty-all-4.0.0.Beta1.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
