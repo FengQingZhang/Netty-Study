@@ -2791,3 +2791,49 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
     ```
 
 # 七、Google Protobuf
+
+## 7.1、编码和解码的基本介绍
+
+1. 编写网络应用程序时，因为数据在网络中传输的都是二进制字节码数据，在发送数据时就需要编码，接收数据时就需要解码
+
+2. codec（编解码器）的组成部分有两个：decoder（解码器）和encoder（编码器）。encoder负责把业务数据转换成字节码数据，decoder负责把字节码数据转换成业务数据
+
+   ![](image\编解码器示意图.png)
+
+## 7.2、Netty本身编码解码的机制和问题分析
+
+1. Netty自身提供了一些codec（编解码器）
+2. Netty提供的编码器
+   1. StringEncoder，对字符串数据进行编码
+   2. ObjectEncoder，对java对象进行编码
+3. Netty提供的解码器
+   1. StringDecoder，对字符串数据进行解码
+   2. ObjectDecoder，对Java对象进行解码
+4. Netty本身自带的ObjectDecoder和ObjectEncoder可以用来实现POJO对象或者各种业务对象的编码和解码，底层使用的仍是java序列化技术，而Java序列化技术本身效率就不高，存在如下问题
+   1. 无法跨语言
+   2. 序列化后的体积太大，是二进制编码的5倍多
+   3. 序列化性能太低
+5. 新解决方案------>Google Protobuf
+
+## 7.3、ProtoBuf
+
+- 基本介绍
+
+1. Protobuf 是 Google 发布的开源项目，全称Google Protocol Buffers，是一种轻便高效的结构化数据存储格式，可以用于结构化数据串行化，或者说序列化。它很适合做数据存储或RPC[远程过程调用remote procedurecall ]数据交换格式。
+   目前很多公司http+jsontcp+protobuf
+
+2. 参考文档 : https:/ldevelopers.google.com/protocol-buffers/docs/proto语言指南
+
+3.  Protobuf是以message 的方式来管理数据的.
+
+4. 支持跨平台、跨语言，即[客户端和服务器端可以是不同的语言编写的]（支持目前绝大多数语言。例如c++，Python，Go等）
+
+5. 高性能，高可靠
+
+6. 使用Protobuf编译器能自动生成代码，ProtoBuf是将类的定义使用.proto文件进行描述，（ps：idea在编写proto文件时，会自动提示是否下载.proto编写插件，可以让语法高亮显示，真是太方便了）
+
+7. 然后通过proto.exe编译器根据.proto自动生成java文件
+
+8. 示意图
+
+   ![](image/Protobuf示意图.png)
