@@ -2837,3 +2837,343 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
 8. 示意图
 
    ![](image/Protobuf示意图.png)
+
+## 7.4、ProtoBuf快速入门实例
+
+1. 客户端可以发送一个Student Pojo对象到服务器（通过ProtoBuf编码）
+
+2. 服务端能接收Student PoJo对象，并显示信息（通过ProtoBuf解码）
+
+   1. Proto文件编写和POJO类自动生成
+
+      ```protobuf
+      //ProtoBuf文件
+      syntax = "proto3";//版本
+      option java_outer_classname = "StudentPOJO";//生成的外部类名，同时也是文件名
+      //protobuf 使用message管理数据
+      message Student{//会在 StudentPOJO外部类生成一个内部类Student，他是真正发送的POJO对象
+        int32  id = 1;//Student 类中有一个属性 名字为id的类型为int32（Proto类型）1表示属性序号,不是值
+        string name =2;
+      }
+      //编译
+      // protoc.exe --java_out=. Student.proto
+      // 将生成的StudentPOJO放入到项目使用
+      ```
+
+   2. 服务端
+
+      ```java
+      package com.feng.netty.codec;
+      
+      import io.netty.bootstrap.ServerBootstrap;
+      import io.netty.channel.*;
+      import io.netty.channel.nio.NioEventLoopGroup;
+      import io.netty.channel.socket.SocketChannel;
+      import io.netty.channel.socket.nio.NioServerSocketChannel;
+      import io.netty.handler.codec.protobuf.ProtobufDecoder;
+      
+      public class NettyServer {
+          public static void main(String[] args) throws InterruptedException {
+              //创建BossGroup和WorkerGroup
+              //说明
+              //1.创建两个线程组bossGroup 和 workerGroup
+              //2.bossGroup 只是处理连接请求，真正的客户端业务处理，会交给workerGroup完成
+              //3.两个都是无限循环
+              EventLoopGroup bossGroup = new NioEventLoopGroup();
+              EventLoopGroup workerGroup =new NioEventLoopGroup();
+              try {
+                  //创建服务器端的启动对象，配置参数
+                  ServerBootstrap bootstrap = new ServerBootstrap();
+                  //使用链式编程来进行设置
+                  bootstrap.group(bossGroup,workerGroup)//设置两个线程组
+                          .channel(NioServerSocketChannel.class)//使用NioSocketChannel作为服务器的通道实现
+                          .option(ChannelOption.SO_BACKLOG,128)//设置线程队列得到连接个数
+                          .childOption(ChannelOption.SO_KEEPALIVE,true)//设置保持活动连接状态
+                          .childHandler(new ChannelInitializer<SocketChannel>() {
+                              @Override
+                              protected void initChannel(SocketChannel ch) throws Exception {
+                                  //在pipeline中加入ProtoBufEncoder
+                                  //指定哪种对象进行解码
+                                  ch.pipeline().addLast("decoder",new ProtobufDecoder(StudentPOJO.Student.getDefaultInstance()));
+                                  ch.pipeline().addLast(new NettyServerHandler());
+                              }
+                          });//
+                  System.out.println("...服务器 is ready...");
+                  //绑定一个端口并且同步，生成了一个chanelFuture
+                  ChannelFuture cf = bootstrap.bind(6668).sync();
+                  cf.addListener(new ChannelFutureListener() {
+                      @Override
+                      public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                          if (cf.isSuccess()){
+                              System.out.println("监听端口6668成功");
+                          }else {
+                              System.out.println("监听端口6668失败");
+                          }
+                      }
+                  });
+                  //对关闭通道进行监听
+                  cf.channel().closeFuture().sync();
+              } finally {
+                  bossGroup.shutdownGracefully();
+                  workerGroup.shutdownGracefully();
+              }
+          }
+      }
+      
+      ```
+
+      ```java
+      package com.feng.netty.codec;
+      
+      import io.netty.buffer.Unpooled;
+      import io.netty.channel.ChannelHandlerContext;
+      import io.netty.channel.SimpleChannelInboundHandler;
+      import io.netty.util.CharsetUtil;
+      
+      /**
+       * 继承SimpleChannelInboundHandler，不用强转类型，更加方便
+       */
+      public class NettyServerHandler extends SimpleChannelInboundHandler<StudentPOJO.Student> {
+      
+      
+          @Override
+          protected void channelRead0(ChannelHandlerContext channelHandlerContext, StudentPOJO.Student student)
+                  throws Exception {
+              System.out.println("客户端发送的数据 id="+student.getId()+"名字="+student.getName());
+          }
+      
+          /**
+           * 数据读取完毕
+           * @param ctx 上下文对象，含有管道pipeline，管道channel，地址
+           */
+          @Override
+          public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+              //将数据写人到缓存，并刷新
+              //一般讲，我们对这个发送的数据进行编码
+              ctx.writeAndFlush(Unpooled.copiedBuffer("hello,客户端(>^ω^<)喵", CharsetUtil.UTF_8));
+          }
+      
+          /**
+           * 处理异常，一般是需要关闭通道
+           */
+          @Override
+          public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+              ctx.close();
+          }
+      }
+      
+      ```
+
+   3. 客户端
+
+      ```java
+      package com.feng.netty.codec;
+      
+      import io.netty.bootstrap.Bootstrap;
+      import io.netty.channel.ChannelFuture;
+      import io.netty.channel.ChannelInitializer;
+      import io.netty.channel.ChannelPipeline;
+      import io.netty.channel.EventLoopGroup;
+      import io.netty.channel.nio.NioEventLoopGroup;
+      import io.netty.channel.socket.SocketChannel;
+      import io.netty.channel.socket.nio.NioSocketChannel;
+      import io.netty.handler.codec.protobuf.ProtobufEncoder;
+      
+      public class NettyClient {
+          public static void main(String[] args) throws InterruptedException {
+              //客户需要一个事件循环组
+              EventLoopGroup group = new NioEventLoopGroup();
+              try {
+                  //创建客户端启动对象
+                  Bootstrap bootstrap =new Bootstrap();
+                  //设置相关参数
+                  bootstrap.group(group)//设置线程组
+                          .channel(NioSocketChannel.class)//设置客户端通道的实现类（反射）
+                          .handler(new ChannelInitializer<SocketChannel>() {
+                              @Override
+                              protected void initChannel(SocketChannel ch) throws Exception {
+      
+                                  ChannelPipeline pipeline = ch.pipeline();
+                                  //在pipeline中加入ProtoBufEncoder
+                                  pipeline.addLast("encoder",new ProtobufEncoder());
+                                  pipeline.addLast(new NettyClientHandler());
+                              }
+                          });
+                  System.out.println("客户端 ok..");
+                  //启动客户端去连接服务器端
+                  //关于channelFuture要分析，涉及到netty都得异步模型
+                  ChannelFuture channelFuture = bootstrap.connect("127.0.0.1",6668).sync();
+                  //给关闭通道进行监听
+                  channelFuture.channel().closeFuture().sync();
+              } finally {
+                  group.shutdownGracefully();
+              }
+          }
+      }
+      
+      ```
+
+      ```java
+      package com.feng.netty.codec;
+      
+      import io.netty.buffer.ByteBuf;
+      import io.netty.buffer.Unpooled;
+      import io.netty.channel.ChannelHandlerContext;
+      import io.netty.channel.ChannelInboundHandlerAdapter;
+      import io.netty.util.CharsetUtil;
+      
+      /**
+       * 客户端
+       * @author cpms
+       */
+      public class NettyClientHandler extends ChannelInboundHandlerAdapter {
+      
+          /**
+           * 当通道就绪就会触发该方法
+           * @param ctx 上下文，
+           */
+          @Override
+          public void channelActive(ChannelHandlerContext ctx) throws Exception {
+              //发送一个student对象到服务器
+              StudentPOJO.Student student = StudentPOJO.Student.newBuilder().setId(4).setName("豹子头林冲").build();
+              ctx.writeAndFlush(student);
+              //System.out.println("client "+ctx);
+              //ctx.writeAndFlush(Unpooled.copiedBuffer("hello.server:(>^ω^<)喵", CharsetUtil.UTF_8));
+          }
+      
+          /**
+           * 当通道有读取事件时，会触发
+           * @param ctx 上下文
+           * @throws Exception
+           */
+          @Override
+          public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+              ByteBuf byteBuf = (ByteBuf) msg;
+              System.out.println("服务器回复的消息："+byteBuf.toString(CharsetUtil.UTF_8));
+              System.out.println("服务器的地址"+ctx.channel().remoteAddress());
+          }
+      
+          @Override
+          public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+              cause.printStackTrace();
+              ctx.close();
+          }
+      }
+      
+      ```
+
+
+
+
+
+## 7.5、ProtoBuf 快速入门实例2
+
+1. 客户端可以随机发送Studnet PoJo/Worker PoJo对象到服务器（通过Protobuf编码）
+
+2. 服务端能接收Student PoJo/Worker PoJo 对象（需要判断是哪种类型），并显示信息（Protobuf编码）
+
+   1. protobuf
+
+      ```java
+      syntax = "proto3";//版本
+      option optimize_for = SPEED; //加快解析
+      option java_package = "com.feng.netty.codec2";
+      option java_outer_classname = "MyDataInfo";//生成的外部类名，同时也是文件名
+      //protobuf 可以使用message管理其他的message
+      message MyMessage{
+        //定义一个枚举类型
+        enum DataType{
+          StudentType = 0; //在proto3 要求enum的编号从0开始
+          WorkerType = 1;
+        }
+        //用来data_type标识是哪个类型
+        DataType data_type = 1;
+        //表示每次枚举类型最多只能出现其中的一个，节省空间
+        oneof dataBody{
+          Student student = 2;
+          Worker worker = 3;
+        }
+      }
+      
+      message Student{//会在 StudentPOJO外部类生成一个内部类Student，他是真正发送的POJO对象
+        int32  id = 1;//Student 类中有一个属性 名字为id的类型为int32（Proto类型）1表示属性序号,不是值
+        string name =2;
+      }
+      message Worker{
+        string name=1;
+        int32 age=2;
+      }
+      ```
+
+   2. 服务端（ps：服务端的代码和上一个例子的代码大部分相同，仅展示不同部分）
+
+      ```java
+      public class NettyServer {
+        ...
+      //在pipeline中加入ProtoBufEncoder
+      //指定哪种对象进行解码
+        ch.pipeline().addLast("decoder",new ProtobufDecoder(MyDataInfo.MyMessage.getDefaultInstance()));
+        ...
+      }
+      ```
+
+      ```java
+      public class NettyServerHandler2 extends SimpleChannelInboundHandler<MyDataInfo.MyMessage> {
+      	
+          @Override
+          protected void channelRead0(ChannelHandlerContext channelHandlerContext,MyDataInfo.MyMessage message)
+                  throws Exception {
+              if (message.getDataType()==MyDataInfo.MyMessage.DataType.StudentType){
+                  System.out.println("学生 id="+message.getStudent().getId()+"名字="+message.getStudent().getName());
+              }else
+                  System.out.println("工人 age="+message.getWorker().getAge()+"名字="+message.getStudent().getName());
+          }
+          ...
+      }
+      ```
+
+   3. 客户端
+
+      ```java
+      public class NettyClientHandler extends ChannelInboundHandlerAdapter {
+              /**
+           * 当通道就绪就会触发该方法
+           * @param ctx 上下文，
+           */
+          @Override
+          public void channelActive(ChannelHandlerContext ctx) throws Exception {
+              //随机发送student或worker对象
+              int randmon = new Random().nextInt(3);
+              MyDataInfo.MyMessage myMessage =null;
+              if (0==randmon){
+                 myMessage= MyDataInfo.MyMessage.newBuilder().
+                          setDataType(MyDataInfo.MyMessage.DataType.StudentType).
+                          setStudent(MyDataInfo.Student.newBuilder()
+                          .setId(5).setName("玉麒麟卢俊义").build()).build();
+              }else {
+                  myMessage= MyDataInfo.MyMessage.newBuilder().
+                          setDataType(MyDataInfo.MyMessage.DataType.WorkerType).
+                          setWorker(MyDataInfo.Worker.newBuilder()
+                                  .setAge(20).setName("楚河").build()).build();
+              }
+              ctx.writeAndFlush(myMessage);
+          }
+      }
+      ```
+
+# 八、Netty编解码器和handler的调用机制
+
+## 8.1、基本说明
+
+1. Netty的组件设计：Netty的主要组件有Channel、EventLoop、ChannelFuture、ChannelHandler、ChannelPipe等
+
+2. ChannelHandler充当了处理入站和出站数据的应用程序逻辑的容器。例如，实现ChannelInboundHandler接口（或ChannelInboundHandlerAdapter）,你就可以接收入站事件和数据，这些业务逻辑处理。当要给客户端发送响应时，也可以从ChannelInboundHandler冲刷数据。业务逻辑通常写在一个或者多个ChannelInboundHandler中。ChannelOutboundHandler原理一样，只不过它是用来处理出站数据的
+
+3. ChannelPipeline提供了ChannelHandler链的容器。以客户端应用程序为例，如果事件的运动方向是从客户端到服务端的,那么我们称这些事件为出站的，即客户端发送给服务端的数据会通过pipeline中的一系列ChannelOutboundHandler，并被这些Handler处理，反之则称为入站。
+
+   ![](image/包含入站和出站channelHandler的channelPipeline.png)
+
+## 8.2、编码解码器
+
+1. 当Netty发送或者接受一个消息的时候，就会发送一次数据转换。入站消息会被解码：从字节转换为另一种格式（比如java对象），如果是出站消息，它会被编码成字节。
+2. Netty提供一系列实用的编解码器，
