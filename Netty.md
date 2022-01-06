@@ -3176,4 +3176,12 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
 ## 8.2、编码解码器
 
 1. 当Netty发送或者接受一个消息的时候，就会发送一次数据转换。入站消息会被解码：从字节转换为另一种格式（比如java对象），如果是出站消息，它会被编码成字节。
-2. Netty提供一系列实用的编解码器，
+2. Netty提供一系列实用的编解码器，他们都实现了ChannelInboundHandler或者ChannelOutboundHandler接口，在这些类中，channelRead方法已经被重写了。以入站为例，对每个从入站channel读取的消息，这个方法会被调用。随后，它将调用由解码器所提供的decode（）方法进行解码，并将已经解码的字节码转发给ChannelPipeline中的下一个channelInboundHandler。
+
+## 8.3、解码器-ByteToMessageDecoder
+
+1. 关系继承图
+
+   ![](image\BytedToMessageDecoder关系继承图.png)
+
+2. 由于不
