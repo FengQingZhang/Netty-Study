@@ -3184,4 +3184,106 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
 
    ![](image\BytedToMessageDecoder关系继承图.png)
 
-2. 由于不
+2. 由于不可能知道远程节点是否会一次性发送一个完整的信息，tcp有可能出现粘包拆包的问题，这个类会对入站数据进行缓冲，直到它准备好被处理。
+
+3. 一个关于ByteToMessageDecoder实例分析
+
+   ```java
+   public class TolntegerDecoder extends ByteToMessageDecoder{
+   	protected void decode(ChannelHandlerContext ctx,ByteBuf in,List<Object> out)throw Exception{
+   		if(in.readableBytes()>=4){
+   		 	out.add(in.readInt());
+   		}
+   	}
+   }
+   /*
+   这个例子，每次入站从ByteBuf中读取4字节，将其解码为一个int，然后将它添加到下一个List中。当没有更多元素可以被添加到该List中时，它的内容将会被发送给下一个ChannelInBoundHandler。int 在被添加到List中时，会被自动装箱为Integer。在调用readint（）方法前必须验证所输入的ByteBuf是否有足够的数据
+   */
+   ```
+   
+   ![](image/decode执行分析图.png)
+
+## 8.4、Netty的Handler链的调用机制
+
+### 结论
+
+不论解码器handler还是编码器handler即接收的消息类型必须与待处理的消息类型一致，否则该handler不会被执行。
+
+在解码器进行数据解码时，需要判断缓存区（ByteBuf）的数据是否足够，否则接收到的结果会期望结果可能不一致
+
+## 8.5、解码器-ReplayingDecoder
+
+1. public abstract class ReplayingDecoder<S> extends ByteToMessageDecoder
+
+2. ReplayingDecoder 拓展了ByteToMessageDecoder类，使用这个类，**我们不必调用readableBytes()方法**。参数S指定了用户状态管理的类型，其中Void代表不需要状态管理。
+
+3. 应用实例:使用ReplayingDecoder编写解码器
+
+   ```java
+   package com.atguigu.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.buffer.ByteBuf;
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.handler.codec.ReplayingDecoder;
+   
+   import java.util.List;
+   
+   public class MyByteToLongDecoder2 extends ReplayingDecoder<Void> {
+       @Override
+       protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+   
+           System.out.println("MyByteToLongDecoder2 被调用");
+           //在 ReplayingDecoder 不需要判断数据是否足够读取，内部会进行处理判断
+           out.add(in.readLong());
+       }
+   }
+   ```
+
+4. ReplayingDecoder使用方便，但是它也有一些局限性：
+
+   1. 并不是所有的ByteBuf操作都被支持，如果调用了一个不被支持的方法，将会抛出一个unsupportedOperationException,
+   2. ReplayingDecoder 在某些情况下可能稍慢于BytedToMessageDecoder，例如网络缓冲并且消息格式复杂时，消息会被拆成了多个碎片，速度变慢。
+
+## 8.6、其它编解码器
+
+### 8.6.1其它解码器
+
+1. LineBasedFrameDecoder 这个类在Netty内部也有使用，它使用行控制字符（\n或者\r\n）作为分隔来解析数据。
+2. DelimiterBasedFrameDecoder 使用自定义的特殊字符作为消息的分隔符。
+3. HttpObjectDecoder： 一个Http数据的解码器。
+4. LengthFieldBaseFrameDecoder： 通过指定长度来标识整包消息，这样就可以自动的处理黏包和半包消息。
+
+### 8.6.2其它编码器
+
+![](image/其他编码器.png)
+
+## 8.7、Log4j 整合到Netty
+
+1. 在Maven中添加对Log4j的依赖在pom.xml
+
+   ```xml
+   		<dependency>
+               <groupId>log4j</groupId>
+               <artifactId>log4j</artifactId>
+               <version>1.2.17</version>
+           </dependency>
+           <dependency>
+               <groupId>org.slf4j</groupId>
+               <artifactId>slf4j-api</artifactId>
+               <version>1.7.25</version>
+           </dependency>
+   		<dependency>
+   			<groupId>org.slf4j</groupId>
+               <artifactId>slf4j-log4j12</artifactId>
+               <version>1.7.25</version>
+               <scope>test</scope>
+   		</dependency>
+   		<dependency>
+               <groupId>org.slf4j</groupId>
+               <artifactId>slf4j-simple</artifactId>
+               <version>1.7.25</version>
+               <scope>test</scope>
+   		</dependency>
+   ```
+
+2. 配置Log4j，在resources/log4j.yml
