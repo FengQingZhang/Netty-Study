@@ -3205,6 +3205,283 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
 
 ## 8.4、Netty的Handler链的调用机制
 
+### 案例要求：
+
+1. 使用自定义的编码器和解码器来说明Netty的handler调用机制
+
+   ​	客户端发送long->服务器
+
+   ​	服务端发送long->客户端
+
+2. 案例
+
+   客户端
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.bootstrap.Bootstrap;
+   import io.netty.channel.ChannelFuture;
+   import io.netty.channel.EventLoopGroup;
+   import io.netty.channel.nio.NioEventLoopGroup;
+   import io.netty.channel.socket.nio.NioSocketChannel;
+   
+   public class MyClient {
+       public static void main(String[] args) {
+           EventLoopGroup group = new NioEventLoopGroup();
+           try {
+               Bootstrap bootstrap = new Bootstrap();
+               bootstrap.group(group).channel(NioSocketChannel.class)
+                       .handler(new MyClientInitializer());//定义一个初始化类
+               ChannelFuture channelFuture = bootstrap.connect("localhost",7000).sync();
+               channelFuture.channel().closeFuture().sync();
+           } catch (InterruptedException e) {
+               e.printStackTrace();
+           } finally {
+               group.shutdownGracefully();
+           }
+       }
+   }
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.channel.ChannelInitializer;
+   import io.netty.channel.ChannelPipeline;
+   import io.netty.channel.socket.SocketChannel;
+   
+   public class MyClientInitializer extends ChannelInitializer<SocketChannel> {
+       @Override
+       protected void initChannel(SocketChannel ch) throws Exception {
+           ChannelPipeline pipeline = ch.pipeline();
+           //加入一个出站的handler对数据进行一个编码
+           pipeline.addLast(new MyLongToByteEncoder());
+           //这时一个入站的解码器（入站handler）
+           pipeline.addLast(new MyByteToLongDecoder2());
+           //加入一个自动义的handler，处理业务
+           pipeline.addLast(new MyClientHandler());
+       }
+   }
+   
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.channel.SimpleChannelInboundHandler;
+   
+   public class MyClientHandler extends SimpleChannelInboundHandler<Long> {
+   
+       @Override
+       protected void channelRead0(ChannelHandlerContext ctx, Long msg) throws Exception {
+           System.out.println("服务器的ip="+ctx.channel().remoteAddress());
+           System.out.println("收到服务器消息="+msg);
+       }
+   
+       //重写channelActive发送数据
+       @Override
+       public void channelActive(ChannelHandlerContext ctx) throws Exception {
+           System.out.println("MyClientHandler 发送数据");
+           ctx.writeAndFlush(123456L);//发送的是一个long
+           //分析
+           //1. "abcdabcdabcdabcd" 是 16个字节
+           //2. 该处理器的前一个handler 是  MyLongToByteEncoder
+           //3. MyLongToByteEncoder 父类  MessageToByteEncoder
+           //4. 父类  MessageToByteEncoder
+           /*
+   
+            public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+           ByteBuf buf = null;
+           try {
+               if (acceptOutboundMessage(msg)) { //判断当前msg 是不是应该处理的类型，如果是就处理，不是就跳过encode
+                   @SuppressWarnings("unchecked")
+                   I cast = (I) msg;
+                   buf = allocateBuffer(ctx, cast, preferDirect);
+                   try {
+                       encode(ctx, cast, buf);
+                   } finally {
+                       ReferenceCountUtil.release(cast);
+                   }
+   
+                   if (buf.isReadable()) {
+                       ctx.write(buf, promise);
+                   } else {
+                       buf.release();
+                       ctx.write(Unpooled.EMPTY_BUFFER, promise);
+                   }
+                   buf = null;
+               } else {
+                   ctx.write(msg, promise);
+               }
+           }
+           4. 因此我们编写 Encoder 是要注意传入的数据类型和处理的数据类型一致
+           */
+           // ctx.writeAndFlush(Unpooled.copiedBuffer("abcdabcdabcdabcd",CharsetUtil.UTF_8));
+       }
+   }
+   
+   ```
+
+   服务端
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.bootstrap.ServerBootstrap;
+   import io.netty.channel.ChannelFuture;
+   import io.netty.channel.EventLoopGroup;
+   import io.netty.channel.nio.NioEventLoopGroup;
+   import io.netty.channel.socket.nio.NioServerSocketChannel;
+   
+   public class MyServer {
+       public static void main(String[] args) throws InterruptedException {
+           EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+           EventLoopGroup workGroup = new NioEventLoopGroup();
+           try {
+               ServerBootstrap serverBootstrap = new ServerBootstrap();
+               serverBootstrap.group(bossGroup,workGroup)
+                       .channel(NioServerSocketChannel.class)
+                       .childHandler(new MyServerInitializer());;
+               ChannelFuture channelFuture = serverBootstrap.bind(7000).sync();
+               channelFuture.channel().closeFuture().sync();
+           } finally {
+               bossGroup.shutdownGracefully();
+               workGroup.shutdownGracefully();
+           }
+       }
+   }
+   
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.channel.ChannelInitializer;
+   import io.netty.channel.ChannelPipeline;
+   import io.netty.channel.socket.SocketChannel;
+   
+   public class MyServerInitializer extends ChannelInitializer<SocketChannel> {
+   
+       @Override
+       protected void initChannel(SocketChannel ch) throws Exception {
+           ChannelPipeline pipeline = ch.pipeline();
+           //入站的handler进行解码 MyByteToLongDecoder
+           pipeline.addLast(new MyByteToLongDecoder());
+           //出站的handler进行编码
+           pipeline.addLast(new MyLongToByteEncoder());
+           //自定义的handler处理业务逻辑。
+           pipeline.addLast(new MyServerHandler());
+       }
+   }
+   
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.channel.SimpleChannelInboundHandler;
+   
+   public class MyServerHandler extends SimpleChannelInboundHandler<Long> {
+   
+       @Override
+       protected void channelRead0(ChannelHandlerContext ctx, Long msg) throws Exception {
+           System.out.println("从客户单"+ctx.channel().remoteAddress()+" 读取到long "+msg);
+           //给客户端发送一个long
+           ctx.writeAndFlush(98765L);
+       }
+   
+       @Override
+       public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+           cause.printStackTrace();
+           ctx.close();
+       }
+   }
+   
+   ```
+
+   编码器
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.buffer.ByteBuf;
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.handler.codec.MessageToByteEncoder;
+   
+   public class MyLongToByteEncoder extends MessageToByteEncoder<Long> {
+   
+       //编码方法
+       @Override
+       protected void encode(ChannelHandlerContext ctx, Long msg, ByteBuf out) throws Exception {
+           System.out.println("MyLongToByteEncoder encode 被调用");
+           System.out.println("msg="+msg);
+           out.writeLong(msg);
+       }
+   }
+   
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.buffer.ByteBuf;
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.handler.codec.ByteToMessageDecoder;
+   
+   import java.util.List;
+   
+   public class MyByteToLongDecoder extends ByteToMessageDecoder {
+   
+       /**
+        * decode会根据接收的数据，被调用多次，直到确定没有新的元素被添加到list
+        * ，或者是ByteBuf 没有更多的可读字节为止
+        * 如果list out不为空，就会将list的内容传递给下一个，channelinboundhandler处理，
+        * 该处理器的方法也会被调用多次
+        * @param ctx 上下文
+        * @param in 入站的Byted
+        * @param out List集合、将解码后的数据传给下一个handler
+        * @throws Exception
+        */
+       @Override
+       protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+           System.out.println("MyByteToLongDecoder被调用");
+           //因为 long 8个字节，需要判断有8个字节，才能读取一个long
+           if (in.readableBytes()>=8){
+               out.add(in.readLong());
+           }
+       }
+   }
+   
+   ```
+
+   ```java
+   package com.feng.netty.inboundhandlerandoutboundhandler;
+   
+   import io.netty.buffer.ByteBuf;
+   import io.netty.channel.ChannelHandlerContext;
+   import io.netty.handler.codec.ReplayingDecoder;
+   
+   import java.util.List;
+   
+   public class MyByteToLongDecoder2 extends ReplayingDecoder<Void> {
+   
+       @Override
+       protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+           System.out.println("MyByteToLongDecoder2 被调用");
+           //在ReplayingDecoder不需要判断数据
+           out.add(in.readLong());
+       }
+   }
+   
+   ```
+
+3. 流程图
+
+   ​	![](image\ChannelPipeline到Threads.png)
+
 ### 结论
 
 不论解码器handler还是编码器handler即接收的消息类型必须与待处理的消息类型一致，否则该handler不会被执行。
@@ -3286,4 +3563,212 @@ public class MyServerHandler extends ChannelInboundHandlerAdapter {
    		</dependency>
    ```
 
-2. 配置Log4j，在resources/log4j.yml
+2. 配置Log4j，在resources/log4j.properties
+
+   ```properties
+   log4j.rootLogger=DEBUG,stdout
+   log4j.appender.stdout=org.apache.log4j.ConsoleAppender
+   log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
+   log4j.appender.stdout.ConversionPattern=[%p]%C{1}-%m%n
+   ```
+
+
+
+
+# 九、TCP粘包和拆包及解决方案
+
+## 9.1、TCP粘包和拆包基本介绍
+
+1. TCP是面向连接的，面向流的，提供高可靠性服务。收发两端（客户端和服务器端）都要有一一成对的Socket，因此，发送端为了将多个发给接收端的包，更有效的发给对方，使用了优化方法（Nagle算法），将多次间隔较小且数据量小的数据，合并成一个大的数据块，然后进行封包。这样做虽然提高了效率，但是接收端就难于分辩出完整的数据包了，因为面向流的通信是无消息保护边界的。
+
+2. 由于TCP无消息保护边界，需要在接收端处理消息边界问题，也就是我们所说的粘包、拆包问题、
+
+3. TCP粘包、拆包示意图
+
+   ![](image/TCP粘包、拆包示意图.png)
+
+   ps：假设客户端分别发送了两个数据包D1和D2给服务端，由于服务端一次读取到字节数是不确定的，故可能存在以下四种情况
+
+   1. 读取两个独立的数据包，分别是D1和D2，没有粘包和拆包
+   2. 一次性接收两个数据包，D1和D2粘合在一起，称之为TCP粘包
+   3. 服务端分两次读取到了数据包，第1次，读取完整的D1包和D2包的部分内容，第二次读取到了D2包的剩余部分，这就是TCP拆包
+   4. 服务端分两次读取带了数据包，第1次，读取到了D1包的部分内容D1_1,第二次读取到了D1包的剩余部分内容D1_2和完整的D2包。
+
+## 9.2、TCP粘包和拆包现象实例
+
+​	编写Netty程序时，如果没有做处理，就会发生粘包和拆包的问题
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+
+public class MyServer {
+    public static void main(String[] args) throws InterruptedException {
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap serverBootstrap = new ServerBootstrap();
+            serverBootstrap.group(bossGroup,workerGroup)
+                    .channel(NioServerSocketChannel.class)
+                    .childHandler(new MyServerHandler());
+            ChannelFuture channelFuture = serverBootstrap.bind(7000).sync();
+            channelFuture.channel().closeFuture().sync();
+        }finally {
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+        }
+    }
+}
+
+```
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+
+import java.nio.charset.Charset;
+import java.util.UUID;
+
+public class MyServerHandler extends SimpleChannelInboundHandler<ByteBuf> {
+    private  int count;
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        ctx.close();
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
+        byte[] buffer = new byte[msg.readableBytes()];
+        msg.readBytes(buffer);
+        //将buffer转成字符串
+        String message = new String(buffer, Charset.forName("utf-8"));
+        System.out.println("服务器接收到数据 "+message);
+        System.out.println("服务器接收到消息量="+ (++this.count));
+        //服务器回送数据给客户端，回送一个数据id，
+        ByteBuf responseByteBuf = Unpooled.copiedBuffer(UUID.randomUUID().toString()+" ",Charset.forName("utf-8"));
+        ctx.writeAndFlush(responseByteBuf);
+    }
+}
+
+```
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.socket.SocketChannel;
+
+public class MyServerInitializer extends ChannelInitializer<SocketChannel> {
+
+    @Override
+    protected void initChannel(SocketChannel ch) throws Exception {
+        ChannelPipeline pipeline = ch.pipeline();
+        pipeline.addLast(new MyServerHandler());
+    }
+}
+
+```
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
+
+public class MyClient {
+    public static void main(String[] args) throws InterruptedException {
+
+        EventLoopGroup group = new NioEventLoopGroup();
+
+        try {
+
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.group(group).channel(NioSocketChannel.class)
+                    .handler(new MyClientInitializer()); //自定义一个初始化类
+
+            ChannelFuture channelFuture = bootstrap.connect("localhost", 7000).sync();
+
+            channelFuture.channel().closeFuture().sync();
+
+        }finally {
+            group.shutdownGracefully();
+        }
+    }
+}
+
+```
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+
+import java.nio.charset.Charset;
+
+public class MyClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
+
+    private  int count;
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        //使用客户端发送10条数据 hello,server 编号
+        for(int i= 0; i< 10; ++i) {
+            ByteBuf buffer = Unpooled.copiedBuffer("hello,server " + i, Charset.forName("utf-8"));
+            ctx.writeAndFlush(buffer);
+        }
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
+        byte[] buffer = new byte[msg.readableBytes()];
+        msg.readBytes(buffer);
+
+        String message = new String(buffer, Charset.forName("utf-8"));
+        System.out.println("客户端接收到消息=" + message);
+        System.out.println("客户端接收消息数量=" + (++this.count));
+
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+
+```
+
+```java
+package com.feng.netty.tcp;
+
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.socket.SocketChannel;
+
+public class MyClientInitializer extends ChannelInitializer<SocketChannel> {
+
+    @Override
+    protected void initChannel(SocketChannel ch) throws Exception {
+        ChannelPipeline pipeline = ch.pipeline();
+        pipeline.addLast(new MyClientHandler());
+    }
+}
+
+```
+
